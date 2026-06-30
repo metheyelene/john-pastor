@@ -70,7 +70,7 @@ interface BundledBible { version: number; source: string; books: BundledBook[] }
 let bibleTeCache: BundledBible | null = null;
 async function loadBundledTE(): Promise<BundledBible> {
   if (bibleTeCache) return bibleTeCache;
-  const r = await fetch("/bible-te.json");
+  const r = await fetch(`${import.meta.env.BASE_URL}bible-te.json`);
   if (!r.ok) throw new Error(`Bundled Telugu Bible missing (HTTP ${r.status}). Re-run setup to restore it.`);
   bibleTeCache = await r.json();
   return bibleTeCache!;
