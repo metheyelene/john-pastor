@@ -81,9 +81,12 @@ export async function suggestScripture(title: string, language: "en" | "te" | "m
 // Returns English/Telugu/bilingual suggestions based on the language flag.
 function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): ScriptureSuggestion[] {
   const t = title.toLowerCase();
-  const out: ScriptureSuggestion[] = [];
+  // Internal row type: each entry carries both English and Telugu reason strings.
+  // The final mapped return is the public ScriptureSuggestion shape.
+  type StubRow = { reference: string; whyEn: string; whyTe: string };
+  const out: StubRow[] = [];
   // Each entry now carries both an English 'whyEn' and a Telugu 'whyTe'. The formatter picks based on language.
-  const map: { keywords: string[]; suggestions: { reference: string; whyEn: string; whyTe: string }[] }[] = [
+  const map: { keywords: string[]; suggestions: StubRow[] }[] = [
     { keywords: ["grace", "mercy", "కృప", "దయ"], suggestions: [
       { reference: "Ephesians 2:8-9", whyEn: "Grace as God's gift, not by works.", whyTe: "కృప దేవుని వరము, మన కర్మల వల్ల కాదు." },
       { reference: "Romans 3:23-24", whyEn: "All fall short, justified freely by his grace.", whyTe: "అందరూ పాపులు, ఆయన కృపచే ఉచితంగా నీతిమంతులుగా చేయబడ్డారు." }
