@@ -1,7 +1,7 @@
 import { getSettings } from "../db";
 
-// AI helper — OpenAI-compatible chat completions.
-// Falls back to a structured stub when no provider/key is configured so the feature is always useful.
+// AI helper — tries OpenAI-compatible chat completions, then Pollinations.ai (truly free, no key),
+// then falls back to a structured stub so the feature is always useful.
 
 export interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
 
@@ -11,28 +11,45 @@ interface ChatOptions {
   maxTokens?: number;
 }
 
+// Pollinations.ai — public, no-key, no-signup text endpoint. Best free AI for pastors on a budget.
+// https://github.com/pollinations/pollinations — model 'openai-fast' is OpenAI-grade quality.
+async function pollinationsChat(messages: ChatMessage[]): Promise<string> {
+  const system = messages.find((m) => m.role === "system")?.content;
+  const userText = messages.filter((m) => m.role !== "system").map((m) => m.content).join("\n\n");
+  const prompt = system ? `${system}\n\n${userText}` : userText;
+  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai-fast&seed=${Date.now() % 100000}`;
+  try {
+    const res = await fetch(url, { headers: { Accept: "text/plain" } });
+    if (!res.ok) throw new Error(`Pollinations HTTP ${res.status}`);
+    const text = (await res.text()).trim();
+    return text || stubReply(messages);
+  } catch (e) {
+    return stubReply(messages) + `\n\n_(Pollinations error: ${(e as Error).message}. Showing offline stub.)_`;
+  }
+}
+
 export async function chat({ messages, temperature = 0.7, maxTokens = 800 }: ChatOptions): Promise<string> {
   const s = await getSettings();
-  if (!s.aiProvider || !s.aiApiKey) return stubReply(messages);
-  try {
-    const res = await fetch(s.aiProvider.replace(/\/$/, "") + "/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${s.aiApiKey}`
-      },
-      body: JSON.stringify({
-        model: s.aiModel || "gpt-4o-mini",
-        messages, temperature, max_tokens: maxTokens,
-        stream: false
-      })
-    });
-    if (!res.ok) throw new Error(`AI ${res.status}`);
-    const data = await res.json();
-    return data?.choices?.[0]?.message?.content?.trim() ?? stubReply(messages);
-  } catch (e) {
-    return stubReply(messages) + `\n\n_(AI error: ${(e as Error).message}. Showing offline stub.)_`;
+  // Path 1: user-configured OpenAI-compatible provider.
+  if (s.aiProvider && s.aiApiKey) {
+    try {
+      const res = await fetch(s.aiProvider.replace(/\/$/, "") + "/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${s.aiApiKey}` },
+        body: JSON.stringify({
+          model: s.aiModel || "gpt-4o-mini",
+          messages, temperature, max_tokens: maxTokens,
+          stream: false
+        })
+      });
+      if (!res.ok) throw new Error(`AI ${res.status}`);
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (text) return text;
+    } catch { /* fall through to Pollinations */ }
   }
+  // Path 2: free Pollinations.ai fallback (no key, no signup).
+  return pollinationsChat(messages);
 }
 
 // ---------- Sermon outline stub ----------

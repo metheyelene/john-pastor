@@ -1,9 +1,11 @@
-import { Box, Stack, TextField, Typography, Dialog, DialogTitle, DialogContent, DialogActions, MenuItem, Chip, IconButton, Switch, FormControlLabel } from "@mui/material";
+import { Box, Stack, TextField, Typography, Dialog, DialogTitle, DialogContent, DialogActions, MenuItem, Chip, IconButton, Switch, FormControlLabel, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DeleteIcon from "@mui/icons-material/Delete";
 import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import HistoryIcon from "@mui/icons-material/History";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import GlassyButton from "../components/GlassyButton";
@@ -44,6 +46,7 @@ export default function EventsPage() {
   const [cursor, setCursor] = useState(new Date());
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ChurchEvent | null>(null);
+  const [view, setView] = useState<"upcoming" | "held">("upcoming");
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const reload = async () => {
@@ -59,18 +62,51 @@ export default function EventsPage() {
     }
   }, []);
 
-  // Check reminders on mount and every 30 min — toast + (if granted) notification one day before.
+  // Check reminders on mount and every 15 min. Fires BOTH day-before and day-of notifications.
+  // Uses localStorage to dedupe so each (event, type, day) only fires once.
   useEffect(() => {
+    const todayStr = () => new Date().toISOString().slice(0, 10);
+    const firedKey = "john:notif-fired";
+    const hasFired = (id: string, kind: "dayBefore" | "dayOf") => {
+      try {
+        const all = JSON.parse(localStorage.getItem(firedKey) || "{}");
+        return Boolean(all[`${id}:${kind}:${todayStr()}`]);
+      } catch { return false; }
+    };
+    const markFired = (id: string, kind: "dayBefore" | "dayOf") => {
+      try {
+        const all = JSON.parse(localStorage.getItem(firedKey) || "{}");
+        all[`${id}:${kind}:${todayStr()}`] = true;
+        localStorage.setItem(firedKey, JSON.stringify(all));
+      } catch { /* ignore */ }
+    };
+
     const check = () => {
+      if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       const tStr = tomorrow.toISOString().slice(0, 10);
-      const due = list.filter((e) => e.reminder && e.date === tStr);
-      due.forEach((e) => {
-        try { new Notification("John — reminder", { body: `${e.title} is tomorrow` }); } catch {}
+      const tdy = todayStr();
+      list.forEach((e) => {
+        if (!e.reminder) return;
+        const when = e.time ? `${e.time} · ` : "";
+        const where = e.location ? `${e.location} · ` : "";
+        const body = `${when}${where}JOHN AI reminder`;
+        if (e.date === tStr && !hasFired(e.id, "dayBefore")) {
+          try {
+            new Notification(`${e.title} — tomorrow`, { body, icon: "/icon.svg", tag: `john-${e.id}-dayBefore` });
+            markFired(e.id, "dayBefore");
+          } catch { /* ignore */ }
+        }
+        if (e.date === tdy && !hasFired(e.id, "dayOf")) {
+          try {
+            new Notification(`${e.title} — today`, { body, icon: "/icon.svg", tag: `john-${e.id}-dayOf` });
+            markFired(e.id, "dayOf");
+          } catch { /* ignore */ }
+        }
       });
     };
     check();
-    const id = setInterval(check, 30 * 60 * 1000);
+    const id = setInterval(check, 15 * 60 * 1000);
     return () => clearInterval(id);
   }, [list]);
 
@@ -80,6 +116,33 @@ export default function EventsPage() {
     const m: Record<string, ChurchEvent[]> = {};
     list.forEach((e) => { (m[e.date] ??= []).push(e); });
     return m;
+  }, [list]);
+
+  // Past events grouped by ISO week (Mon → Sun), newest week first.
+  const heldGroups = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const past = list.filter((e) => e.date < today);
+    if (!past.length) return [];
+    const getWeekStart = (dateStr: string) => {
+      const d = new Date(dateStr + "T00:00:00");
+      const dow = d.getDay(); // 0 = Sun
+      const diff = dow === 0 ? -6 : 1 - dow;
+      d.setDate(d.getDate() + diff);
+      return d.toISOString().slice(0, 10);
+    };
+    const groups = new Map<string, ChurchEvent[]>();
+    past.forEach((e) => {
+      const ws = getWeekStart(e.date);
+      const arr = groups.get(ws) ?? [];
+      arr.push(e);
+      groups.set(ws, arr);
+    });
+    return Array.from(groups.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([weekStart, events]) => ({
+        weekStart,
+        events: events.sort((a, b) => a.date.localeCompare(b.date))
+      }));
   }, [list]);
 
   const dayEvents = selectedDay ? (byDay[selectedDay] ?? []).sort((a, b) => (a.time ?? "").localeCompare(b.time ?? "")) : [];
@@ -92,10 +155,93 @@ export default function EventsPage() {
 
   return (
     <Box>
-      <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ xs: "stretch", sm: "center" }} spacing={2} sx={{ mb: 2 }}>
         <Typography variant="h4" sx={{ fontWeight: 700, flex: 1 }}>{t("events")}</Typography>
+        <ToggleButtonGroup
+          value={view}
+          exclusive
+          onChange={(_, v) => v && setView(v)}
+          size="small"
+          color="primary"
+          sx={{ "& .MuiToggleButton-root": { px: 2, py: 0.75, fontWeight: 600, fontSize: "0.8125rem" } }}
+        >
+          <ToggleButton value="upcoming"><CalendarMonthIcon fontSize="small" sx={{ mr: 0.75 }} />Upcoming</ToggleButton>
+          <ToggleButton value="held"><HistoryIcon fontSize="small" sx={{ mr: 0.75 }} />Held</ToggleButton>
+        </ToggleButtonGroup>
         <GlassyButton variant="contained" startIcon={<AddIcon />} onClick={() => { setEditing(null); setOpen(true); }}>{t("add")}</GlassyButton>
       </Stack>
+
+      {view === "held" ? (
+        heldGroups.length === 0 ? (
+          <AnimatedCard sx={{ p: 6, textAlign: "center" }}>
+            <HistoryIcon sx={{ fontSize: 48, opacity: 0.35, mb: 1.5 }} />
+            <Typography variant="body1" sx={{ opacity: 0.75 }}>No past events yet</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.55 }}>
+              Events move here automatically the day after they happen.
+            </Typography>
+          </AnimatedCard>
+        ) : (
+          heldGroups.map(({ weekStart, events }) => {
+            const start = new Date(weekStart + "T00:00:00");
+            const end = new Date(start); end.setDate(end.getDate() + 6);
+            const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+            const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            return (
+              <Box key={weekStart} sx={{ mb: 3 }}>
+                <Stack direction="row" alignItems="baseline" spacing={1.5} sx={{ mb: 1.25 }}>
+                  <Typography variant="overline" sx={{ color: "primary.main", letterSpacing: 2, fontWeight: 700 }}>
+                    Week of {fmt(start)} – {fmt(end)}
+                  </Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.5 }}>
+                    {events.length} {events.length === 1 ? "event" : "events"}
+                  </Typography>
+                </Stack>
+                <Stack spacing={1}>
+                  {events.map((e) => {
+                    const meta = TYPES.find((t) => t.id === e.type);
+                    const d = new Date(e.date + "T00:00:00");
+                    return (
+                      <AnimatedCard key={e.id} sx={{ p: 2, display: "flex", alignItems: "center", gap: 2 }}>
+                        <Box sx={{ minWidth: 52, textAlign: "center" }}>
+                          <Typography variant="overline" sx={{ color: "primary.main", letterSpacing: 1.5, lineHeight: 1, display: "block", fontSize: "0.65rem" }}>
+                            {dayLabels[d.getDay()]}
+                          </Typography>
+                          <Typography variant="h5" sx={{ fontWeight: 700, lineHeight: 1.1, mt: 0.25 }}>
+                            {d.getDate()}
+                          </Typography>
+                          <Typography variant="caption" sx={{ opacity: 0.6, fontSize: "0.65rem" }}>
+                            {fmt(d)}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: meta?.color ?? "#666", opacity: 0.85 }} />
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Typography variant="body1" sx={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <Box component="span" sx={{ mr: 1 }}>{meta?.emoji}</Box>{e.title}
+                            </Typography>
+                            <Chip label={meta?.label} size="small" sx={{ background: `${meta?.color}22`, color: meta?.color, height: 20, fontSize: "0.6875rem" }} />
+                          </Stack>
+                          {(e.time || e.location) && (
+                            <Typography variant="caption" sx={{ opacity: 0.65, display: "block" }}>
+                              {[e.time, e.location].filter(Boolean).join(" · ")}
+                            </Typography>
+                          )}
+                        </Box>
+                        <IconButton size="small" onClick={() => { setEditing(e); setOpen(true); }} aria-label="edit">
+                          <HistoryIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" color="error" onClick={() => remove(e)} aria-label="delete">
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </AnimatedCard>
+                    );
+                  })}
+                </Stack>
+              </Box>
+            );
+          })
+        )
+      ) : null}
 
       <AnimatedCard sx={{ p: 2, mb: 3 }}>
         <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
@@ -214,7 +360,7 @@ function EventDialog({ open, onClose, event, members, onSave, onDelete }: {
           </TextField>
           <TextField label="Location" value={location} onChange={(e) => setLocation(e.target.value)} />
           <TextField label="Notes" multiline rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          <FormControlLabel control={<Switch checked={reminder} onChange={(e) => setReminder(e.target.checked)} />} label="Remind me 1 day before" />
+          <FormControlLabel control={<Switch checked={reminder} onChange={(e) => setReminder(e.target.checked)} />} label="Send me a reminder (day before + day of)" />
         </Stack>
       </DialogContent>
       <DialogActions>

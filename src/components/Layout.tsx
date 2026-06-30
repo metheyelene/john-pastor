@@ -70,7 +70,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           <Toolbar sx={{ gap: 1.5, py: 2 }}>
             <Avatar sx={{ background: "linear-gradient(135deg,#ffb74d,#ec407a)", color: "#1a1a40", fontWeight: 700 }}>J</Avatar>
             <Box>
-              <Typography variant="h6" sx={{ lineHeight: 1 }}>John</Typography>
+              <Typography variant="h6" sx={{ lineHeight: 1, letterSpacing: "0.04em" }}>JOHN AI</Typography>
               <Typography variant="caption" sx={{ opacity: 0.6 }}>{pastorName || t("tagline")}</Typography>
             </Box>
           </Toolbar>
@@ -114,7 +114,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {!isTabletUp && (
           <Drawer anchor="left" open={open} onClose={() => setOpen(false)}
             sx={{ "& .MuiDrawer-paper": { width: 280, background: "rgba(10,10,35,0.95)", backdropFilter: "blur(20px)" } }}>
-            <Toolbar sx={{ gap: 1.5 }}><Avatar sx={{ background: "linear-gradient(135deg,#ffb74d,#ec407a)", color: "#1a1a40", fontWeight: 700 }}>J</Avatar><Typography variant="h6">John</Typography></Toolbar>
+            <Toolbar sx={{ gap: 1.5 }}><Avatar sx={{ background: "linear-gradient(135deg,#dc2626,#ef4444)", color: "#ffffff", fontWeight: 700 }}>J</Avatar><Typography variant="h6" sx={{ letterSpacing: "0.04em" }}>JOHN AI</Typography></Toolbar>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.06)" }} />
             <List sx={{ px: 1 }}>
               {NAV.map((n) => (

@@ -1,4 +1,4 @@
-import { Box, Stack, TextField, Typography, Switch, FormControlLabel, Divider, MenuItem, Alert } from "@mui/material";
+import { Box, Stack, TextField, Typography, Switch, FormControlLabel, Divider, MenuItem, Alert, Chip, Button } from "@mui/material";
 import BackupIcon from "@mui/icons-material/Backup";
 import RestoreIcon from "@mui/icons-material/Restore";
 import LockIcon from "@mui/icons-material/Lock";
@@ -87,15 +87,54 @@ export default function SettingsPage() {
       </AnimatedCard>
 
       <AnimatedCard sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>AI (Sermon Assistant, summaries)</Typography>
-        <Typography variant="caption" sx={{ display: "block", opacity: 0.7, mb: 2 }}>
-          Any OpenAI-compatible endpoint. Without a key, John shows a thoughtful offline stub.
-        </Typography>
+        <Stack direction="row" alignItems="center" sx={{ mb: 1.5 }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>AI (Sermon Assistant, summaries)</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.65 }}>
+              Works out of the box via free Pollinations.ai. Paste your own key for higher quality.
+            </Typography>
+          </Box>
+          <Chip
+            size="small"
+            label={
+              s.aiProvider && s.aiApiKey
+                ? (s.aiProvider.includes('groq') ? 'Groq' : 'Custom provider')
+                : 'Pollinations (free, no signup)'
+            }
+            color={s.aiProvider && s.aiApiKey ? 'primary' : 'success'}
+            variant="outlined"
+            sx={{ fontWeight: 600 }}
+          />
+        </Stack>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 2 }}>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={() => set({ aiProvider: "https://api.groq.com/openai/v1", aiModel: "llama-3.1-70b-versatile" })}
+          >
+            Use Groq free tier
+          </Button>
+          <Button
+            size="small"
+            component="a"
+            href="https://console.groq.com/keys"
+            target="_blank"
+            rel="noopener"
+          >
+            Get free Groq key (30 sec signup)
+          </Button>
+          {(s.aiProvider || s.aiApiKey) && (
+            <Button size="small" color="error" onClick={() => set({ aiProvider: "", aiApiKey: "", aiModel: "" })}>
+              Clear & use Pollinations
+            </Button>
+          )}
+        </Stack>
         <Stack spacing={2}>
           <TextField label="Provider base URL" placeholder="https://api.openai.com/v1"
-            value={s.aiProvider ?? ""} onChange={(e) => set({ aiProvider: e.target.value })} />
+            value={s.aiProvider ?? ""} onChange={(e) => set({ aiProvider: e.target.value })}
+            helperText="Leave empty to use the free Pollinations fallback (no signup)." />
           <TextField label="API key" type="password" value={s.aiApiKey ?? ""} onChange={(e) => set({ aiApiKey: e.target.value })} />
-          <TextField label="Model" placeholder="gpt-4o-mini"
+          <TextField label="Model" placeholder="gpt-4o-mini / llama-3.1-70b-versatile"
             value={s.aiModel ?? ""} onChange={(e) => set({ aiModel: e.target.value })} />
         </Stack>
       </AnimatedCard>
@@ -118,15 +157,59 @@ export default function SettingsPage() {
       </AnimatedCard>
 
       <AnimatedCard sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>Notifications</Typography>
+        <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
+          <Chip
+            size="small"
+            color={
+              typeof Notification === "undefined"
+                ? "default"
+                : Notification.permission === "granted"
+                ? "success"
+                : Notification.permission === "denied"
+                ? "error"
+                : "primary"
+            }
+            label={
+              typeof Notification === "undefined"
+                ? "Not supported"
+                : Notification.permission === "granted"
+                ? "Enabled"
+                : Notification.permission === "denied"
+                ? "Blocked"
+                : "Not asked yet"
+            }
+            sx={{ fontWeight: 600 }}
+          />
+          <Typography variant="caption" sx={{ opacity: 0.7 }}>
+            John uses notifications to remind you of events 1 day before + on the day.
+          </Typography>
+        </Stack>
+        <Stack direction="row" spacing={1.5}>
+          {typeof Notification !== "undefined" && Notification.permission === "default" && (
+            <GlassyButton variant="contained" size="small" onClick={() => Notification.requestPermission()}>
+              Ask for permission
+            </GlassyButton>
+          )}
+          {typeof Notification !== "undefined" && Notification.permission === "granted" && (
+            <GlassyButton size="small" onClick={() => new Notification("JOHN AI", { body: "Notifications are working — you'll get reminders for events.", icon: "/icon.svg" })}>
+              Send test notification
+            </GlassyButton>
+          )}
+          {typeof Notification !== "undefined" && Notification.permission === "denied" && (
+            <Typography variant="caption" sx={{ opacity: 0.65 }}>
+              You've blocked notifications. Open your browser's site settings to re-enable.
+            </Typography>
+          )}
+        </Stack>
+      </AnimatedCard>
+
+      <AnimatedCard sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>Privacy</Typography>
         <Stack spacing={1}>
           <FormControlLabel
             control={<Switch checked={s.encryptionEnabled} onChange={(e) => set({ encryptionEnabled: e.target.checked })} icon={<LockIcon />} checkedIcon={<LockIcon />} />}
             label="Encrypt counseling notes (passphrase prompt when saving)"
-          />
-          <FormControlLabel
-            control={<Switch checked={s.notificationsEnabled} onChange={(e) => set({ notificationsEnabled: e.target.checked })} />}
-            label="Send browser notifications for event reminders"
           />
           <Typography variant="caption" sx={{ opacity: 0.6 }}>
             All data lives on your device. No telemetry. No analytics.
