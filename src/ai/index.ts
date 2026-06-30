@@ -51,12 +51,19 @@ export async function sermonOutline(topic: string, scripture?: string): Promise<
 // ---------- Suggest Bible references from a sermon title ----------
 export interface ScriptureSuggestion { reference: string; why: string }
 
-export async function suggestScripture(title: string): Promise<ScriptureSuggestion[]> {
+// language: 'en' = English suggestions (English "why"), 'te' = Telugu suggestions (Telugu "why"),
+// 'mixed' = reference in English (canonical), "why" in Telugu.
+export async function suggestScripture(title: string, language: "en" | "te" | "mixed" = "en"): Promise<ScriptureSuggestion[]> {
   const t = title.trim();
   if (!t) return [];
   const sys: ChatMessage = {
     role: "system",
-    content: "You are a careful, biblically literate pastor's assistant. Given a sermon title, suggest 1 to 3 Bible references that directly connect to the topic. For each, reply with JSON object on its own line: {\"reference\":\"Book Ch:V-V\",\"why\":\"one short sentence\"}. Use widely-known passages. Reply ONLY with the JSON lines, no commentary."
+    content:
+      language === "te"
+        ? "మీరు ఒక జాగ్రత్తగా, బైబిల్ పరిజ్ఞానం గల పాస్టర్ సహాయకుడు. ప్రవచన శీర్షిక ఇవ్వబడితే, 1 నుండి 3 బైబిల్ వచన సూచనలను అందించండి. ప్రతి దానికి, ఈ JSON ఆబ్జెక్ట్‌ను దాని స్వంత లైన్‌లో రాయండి: {\"reference\":\"Book Ch:V-V\",\"why\":\"ఒక చిన్న తెలుగు వాక్యం\"}. ప్రసిద్ధ వచనాలను ఉపయోగించండి. JSON లైన్‌లను మాత్రమే రాయండి, ఇతర వ్యాఖ్యానం ఉండకూడదు."
+        : language === "mixed"
+        ? "You are a careful, biblically literate pastor's assistant. Given a sermon title, suggest 1 to 3 Bible references. The 'reference' field MUST be in standard English format (e.g. 'John 3:16'). The 'why' field MUST be in Telugu (తెలుగు). Reply ONLY with JSON objects, one per line: {\"reference\":\"Book Ch:V-V\",\"why\":\"తెలుగు వాక్యం\"}. No commentary."
+        : "You are a careful, biblically literate pastor's assistant. Given a sermon title, suggest 1 to 3 Bible references that directly connect to the topic. For each, reply with JSON object on its own line: {\"reference\":\"Book Ch:V-V\",\"why\":\"one short sentence\"}. Use widely-known passages. Reply ONLY with the JSON lines, no commentary."
   };
   const user: ChatMessage = { role: "user", content: `Sermon title: "${t}"\nConnected Bible references (JSON lines):` };
   const out = await chat({ messages: [sys, user], temperature: 0.4, maxTokens: 300 });
@@ -67,92 +74,104 @@ export async function suggestScripture(title: string): Promise<ScriptureSuggesti
   }
   if (parsed.length) return parsed.slice(0, 3);
   // Fallback: rule-based stub by keyword.
-  return stubScripture(t);
+  return stubScripture(t, language);
 }
 
 // Keyword-based stub for when no AI is configured.
-function stubScripture(title: string): ScriptureSuggestion[] {
+// Returns English/Telugu/bilingual suggestions based on the language flag.
+function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): ScriptureSuggestion[] {
   const t = title.toLowerCase();
   const out: ScriptureSuggestion[] = [];
-  const map: { keywords: string[]; suggestions: ScriptureSuggestion[] }[] = [
-    { keywords: ["grace", "mercy"], suggestions: [
-      { reference: "Ephesians 2:8-9", why: "Grace as God's gift, not by works." },
-      { reference: "Romans 3:23-24", why: "All fall short, justified freely by his grace." }
+  // Each entry now carries both an English 'whyEn' and a Telugu 'whyTe'. The formatter picks based on language.
+  const map: { keywords: string[]; suggestions: { reference: string; whyEn: string; whyTe: string }[] }[] = [
+    { keywords: ["grace", "mercy", "కృప", "దయ"], suggestions: [
+      { reference: "Ephesians 2:8-9", whyEn: "Grace as God's gift, not by works.", whyTe: "కృప దేవుని వరము, మన కర్మల వల్ల కాదు." },
+      { reference: "Romans 3:23-24", whyEn: "All fall short, justified freely by his grace.", whyTe: "అందరూ పాపులు, ఆయన కృపచే ఉచితంగా నీతిమంతులుగా చేయబడ్డారు." }
     ]},
-    { keywords: ["love", "beloved"], suggestions: [
-      { reference: "1 Corinthians 13:4-7", why: "The shape of love." },
-      { reference: "John 3:16", why: "God's love for the world." },
-      { reference: "1 John 4:8", why: "God is love." }
+    { keywords: ["love", "ప్రేమ", "beloved"], suggestions: [
+      { reference: "1 Corinthians 13:4-7", whyEn: "The shape of love.", whyTe: "ప్రేమ యొక్క రూపం." },
+      { reference: "John 3:16", whyEn: "God's love for the world.", whyTe: "దేవుడు లోకాన్ని ప్రేమించాడు." },
+      { reference: "1 John 4:8", whyEn: "God is love.", whyTe: "దేవుడే ప్రేమ." }
     ]},
-    { keywords: ["faith", "trust", "believe"], suggestions: [
-      { reference: "Hebrews 11:1", why: "Faith is the substance of things hoped for." },
-      { reference: "Romans 10:17", why: "Faith comes by hearing the word." }
+    { keywords: ["faith", "trust", "believe", "విశ్వాసం", "నమ్మకం"], suggestions: [
+      { reference: "Hebrews 11:1", whyEn: "Faith is the substance of things hoped for.", whyTe: "విశ్వాసం ఆశించిన వాటికి ఆధారం." },
+      { reference: "Romans 10:17", whyEn: "Faith comes by hearing the word.", whyTe: "విశ్వాసం వాక్యం వినుటవల్ల వస్తుంది." }
     ]},
-    { keywords: ["hope"], suggestions: [
-      { reference: "Romans 15:13", why: "God of hope who fills with joy and peace." },
-      { reference: "Hebrews 6:19", why: "Hope as an anchor of the soul." }
+    { keywords: ["hope", "నిరీక్షణ"], suggestions: [
+      { reference: "Romans 15:13", whyEn: "God of hope who fills with joy and peace.", whyTe: "నిరీక్షణ దేవుడు సంతోషమును, సమాధానమును నింపును." },
+      { reference: "Hebrews 6:19", whyEn: "Hope as an anchor of the soul.", whyTe: "నిరీక్షణ ఆత్మకు నాగరకం." }
     ]},
-    { keywords: ["prayer", "pray", "intercession"], suggestions: [
-      { reference: "Philippians 4:6-7", why: "Prayer with thanksgiving brings peace." },
-      { reference: "Matthew 6:9-13", why: "The Lord's Prayer as a template." }
+    { keywords: ["prayer", "pray", "intercession", "ప్రార్థన"], suggestions: [
+      { reference: "Philippians 4:6-7", whyEn: "Prayer with thanksgiving brings peace.", whyTe: "కృతజ్ఞతలతో ప్రార్థన చేయుట సమాధానమిచ్చును." },
+      { reference: "Matthew 6:9-13", whyEn: "The Lord's Prayer as a template.", whyTe: "ప్రభువు ప్రార్థన ఆదర్శం." }
     ]},
-    { keywords: ["fear", "anxiety", "worry", "anxious"], suggestions: [
-      { reference: "Isaiah 41:10", why: "Do not fear, for I am with you." },
-      { reference: "Philippians 4:6-7", why: "Be anxious for nothing." },
-      { reference: "Matthew 6:25-34", why: "Do not worry about tomorrow." }
+    { keywords: ["fear", "anxiety", "worry", "anxious", "భయం", "ఆందోళన"], suggestions: [
+      { reference: "Isaiah 41:10", whyEn: "Do not fear, for I am with you.", whyTe: "భయపడకుము, నేను నీతో ఉన్నాను." },
+      { reference: "Philippians 4:6-7", whyEn: "Be anxious for nothing.", whyTe: "ఏ విషయములోను చింతించకుడి." },
+      { reference: "Matthew 6:25-34", whyEn: "Do not worry about tomorrow.", whyTe: "రేపటి గురించి చింతించకుడి." }
     ]},
-    { keywords: ["forgiveness", "forgive", "repent"], suggestions: [
-      { reference: "1 John 1:9", why: "Confess and be forgiven." },
-      { reference: "Ephesians 4:32", why: "Forgive as Christ forgave you." }
+    { keywords: ["forgiveness", "forgive", "repent", "క్షమాపణ", "పశ్చాత్తాపం"], suggestions: [
+      { reference: "1 John 1:9", whyEn: "Confess and be forgiven.", whyTe: "ఒప్పుకొనుము, క్షమించబడతారు." },
+      { reference: "Ephesians 4:32", whyEn: "Forgive as Christ forgave you.", whyTe: "క్రీస్తు మిమ్మును క్షమించినట్టు మీరు క్షమించుడి." }
     ]},
-    { keywords: ["suffering", "trial", "tribulation", "pain"], suggestions: [
-      { reference: "Romans 8:28", why: "All things work together for good." },
-      { reference: "James 1:2-4", why: "Count it all joy when you meet trials." }
+    { keywords: ["suffering", "trial", "tribulation", "pain", "శ్రమ", "కష్టం"], suggestions: [
+      { reference: "Romans 8:28", whyEn: "All things work together for good.", whyTe: "సమస్తం మంచిగా కలిసి పనిచేయును." },
+      { reference: "James 1:2-4", whyEn: "Count it all joy when you meet trials.", whyTe: "పరీక్షలలో సంతోషించుడి." }
     ]},
-    { keywords: ["shepherd", "pastor", "leader", "leadership"], suggestions: [
-      { reference: "Psalm 23", why: "The Lord is my shepherd." },
-      { reference: "1 Peter 5:2-3", why: "Shepherd the flock willingly." }
+    { keywords: ["shepherd", "pastor", "leader", "leadership", "కాపరి"], suggestions: [
+      { reference: "Psalm 23", whyEn: "The Lord is my shepherd.", whyTe: "ప్రభువు నా కాపరి." },
+      { reference: "1 Peter 5:2-3", whyEn: "Shepherd the flock willingly.", whyTe: "మందను సేతిగా కాయుడి." }
     ]},
-    { keywords: ["worship", "praise"], suggestions: [
-      { reference: "Psalm 100", why: "Make a joyful noise to the Lord." },
-      { reference: "John 4:24", why: "Worship in spirit and truth." }
+    { keywords: ["worship", "praise", "స్తుతి", "ఆరాధన"], suggestions: [
+      { reference: "Psalm 100", whyEn: "Make a joyful noise to the Lord.", whyTe: "సంతోష ధ్వనితో ప్రభువును స్తుతించుడి." },
+      { reference: "John 4:24", whyEn: "Worship in spirit and truth.", whyTe: "ఆత్మలో సత్యములో ఆరాధించుడి." }
     ]},
-    { keywords: ["spirit", "holy spirit", "pentecost"], suggestions: [
-      { reference: "Acts 2", why: "The Spirit poured out at Pentecost." },
-      { reference: "Galatians 5:22-23", why: "The fruit of the Spirit." }
+    { keywords: ["spirit", "holy spirit", "pentecost", "ఆత్మ", "పరిశుద్ధాత్మ"], suggestions: [
+      { reference: "Acts 2", whyEn: "The Spirit poured out at Pentecost.", whyTe: "పెంతెకోస్తునాడు ఆత్మ కుమ్మరించబడెను." },
+      { reference: "Galatians 5:22-23", whyEn: "The fruit of the Spirit.", whyTe: "ఆత్మ ఫలము." }
     ]},
-    { keywords: ["marriage", "wedding", "husband", "wife"], suggestions: [
-      { reference: "Ephesians 5:25-33", why: "Husbands love wives as Christ loved the church." },
-      { reference: "Genesis 2:24", why: "The two shall become one flesh." }
+    { keywords: ["marriage", "wedding", "husband", "wife", "వివాహం"], suggestions: [
+      { reference: "Ephesians 5:25-33", whyEn: "Husbands love wives as Christ loved the church.", whyTe: "భర్తలు క్రీస్తు సంఘాన్ని ప్రేమించినట్టు భార్యలను ప్రేమించుడి." },
+      { reference: "Genesis 2:24", whyEn: "The two shall become one flesh.", whyTe: "ఇద్దరు ఒక మాంసముగా ఉందురు." }
     ]},
-    { keywords: ["parent", "child", "children", "family"], suggestions: [
-      { reference: "Proverbs 22:6", why: "Train up a child in the way." },
-      { reference: "Ephesians 6:1-4", why: "Children obey parents; fathers do not provoke." }
+    { keywords: ["parent", "child", "children", "family", "తల్లిదండ్రులు", "కుటుంబం"], suggestions: [
+      { reference: "Proverbs 22:6", whyEn: "Train up a child in the way.", whyTe: "బిడ్డను దేవుని మార్గములో నేర్పించుము." },
+      { reference: "Ephesians 6:1-4", whyEn: "Children obey parents; fathers do not provoke.", whyTe: "బిడ్డలు తల్లిదండ్రులకు లోబడుడి." }
     ]},
-    { keywords: ["steward", "money", "tithe", "giving", "stewardship"], suggestions: [
-      { reference: "Malachi 3:10", why: "Bring the tithes into the storehouse." },
-      { reference: "2 Corinthians 9:7", why: "God loves a cheerful giver." }
+    { keywords: ["steward", "money", "tithe", "giving", "stewardship", "దశమ"], suggestions: [
+      { reference: "Malachi 3:10", whyEn: "Bring the tithes into the storehouse.", whyTe: "దశమాన్ను గిడ్డంగిలోనికి తేవుడి." },
+      { reference: "2 Corinthians 9:7", whyEn: "God loves a cheerful giver.", whyTe: "దేవుడు సంతోషంగా ఇచ్చువానిని ప్రేమించును." }
     ]},
-    { keywords: ["evangel", "mission", "witness"], suggestions: [
-      { reference: "Matthew 28:19-20", why: "The Great Commission." },
-      { reference: "Acts 1:8", why: "You will be my witnesses." }
+    { keywords: ["evangel", "mission", "witness", "సువార్త", "మిషన్"], suggestions: [
+      { reference: "Matthew 28:19-20", whyEn: "The Great Commission.", whyTe: "గొప్ప ఆజ్ఞాపన." },
+      { reference: "Acts 1:8", whyEn: "You will be my witnesses.", whyTe: "మీరు నా సాక్షులు." }
     ]}
   ];
+  const isTeluguTitle = /[\u0C00-\u0C7F]/.test(title);
   for (const entry of map) {
-    if (entry.keywords.some((k) => t.includes(k))) {
+    if (entry.keywords.some((k) => t.includes(k.toLowerCase()))) {
       out.push(...entry.suggestions);
       if (out.length >= 3) break;
     }
   }
   if (out.length === 0) {
-    // Default to a few universal passages so the feature always has something to show.
+    if (isTeluguTitle) {
+      return [
+        { reference: "John 3:16", whyTe: "దేవుడు లోకాన్ని ప్రేమించాడు." },
+        { reference: "Romans 8:28", whyTe: "సమస్తం మంచిగా కలిసి పనిచేయును." },
+        { reference: "Philippians 4:13", whyTe: "క్రీస్తు ద్వారా సమస్తమును చేయగలను." }
+      ];
+    }
     return [
-      { reference: "John 3:16", why: "God's love for the world." },
-      { reference: "Romans 8:28", why: "God works all things for good." },
-      { reference: "Philippians 4:13", why: "Strength through Christ." }
+      { reference: "John 3:16", whyEn: "God's love for the world." },
+      { reference: "Romans 8:28", whyEn: "God works all things for good." },
+      { reference: "Philippians 4:13", whyEn: "Strength through Christ." }
     ];
   }
-  return out.slice(0, 3);
+  return out.slice(0, 3).map((s) => {
+    const reason = language === "te" ? s.whyTe : language === "mixed" ? s.whyTe : s.whyEn;
+    return { reference: s.reference, why: reason };
+  });
 }
 
 // ---------- Summarizer (YouTube transcript / long text / OCR) ----------

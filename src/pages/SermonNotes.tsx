@@ -192,7 +192,7 @@ function SermonNoteDialog({ open, onClose, note, onSaved }: { open: boolean; onC
   const suggestFromTitle = async () => {
     if (!title.trim()) return;
     setSuggestBusy(true);
-    try { setSuggestions(await suggestScripture(title.trim())); }
+    try { setSuggestions(await suggestScripture(title.trim(), language)); }
     finally { setSuggestBusy(false); }
   };
 
