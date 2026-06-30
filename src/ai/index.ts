@@ -9,15 +9,25 @@ interface ChatOptions {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  /** Per-request seed. Default: stable hash of the prompt so identical inputs give identical outputs (deterministic across reloads); callers can pass Math.random() for fresh variation. */
+  seed?: number;
 }
+
+export function hashStringSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+function hashString(s: string): number { return hashStringSeed(s); }
 
 // Pollinations.ai — public, no-key, no-signup text endpoint. Best free AI for pastors on a budget.
 // https://github.com/pollinations/pollinations — model 'openai-fast' is OpenAI-grade quality.
-async function pollinationsChat(messages: ChatMessage[]): Promise<string> {
+async function pollinationsChat(messages: ChatMessage[], seed: number): Promise<string> {
   const system = messages.find((m) => m.role === "system")?.content;
   const userText = messages.filter((m) => m.role !== "system").map((m) => m.content).join("\n\n");
   const prompt = system ? `${system}\n\n${userText}` : userText;
-  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai-fast&seed=${Date.now() % 100000}`;
+  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai-fast&seed=${seed}`;
   try {
     const res = await fetch(url, { headers: { Accept: "text/plain" } });
     if (!res.ok) throw new Error(`Pollinations HTTP ${res.status}`);
@@ -28,7 +38,10 @@ async function pollinationsChat(messages: ChatMessage[]): Promise<string> {
   }
 }
 
-export async function chat({ messages, temperature = 0.7, maxTokens = 800 }: ChatOptions): Promise<string> {
+export async function chat({ messages, temperature = 0.75, maxTokens = 800, seed }: ChatOptions): Promise<string> {
+  // Default to a stable hash of the prompt so re-running the same sermon title is deterministic
+  // (caller can pass an explicit seed for variety, e.g. chat re-rolls).
+  const effectiveSeed = seed ?? hashStringSeed(messages.map((m) => m.content).join("|") + `|t=${temperature}`);
   const s = await getSettings();
   // Path 1: user-configured OpenAI-compatible provider.
   if (s.aiProvider && s.aiApiKey) {
@@ -38,7 +51,7 @@ export async function chat({ messages, temperature = 0.7, maxTokens = 800 }: Cha
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${s.aiApiKey}` },
         body: JSON.stringify({
           model: s.aiModel || "gpt-4o-mini",
-          messages, temperature, max_tokens: maxTokens,
+          messages, temperature, max_tokens: maxTokens, seed: effectiveSeed,
           stream: false
         })
       });
@@ -49,20 +62,28 @@ export async function chat({ messages, temperature = 0.7, maxTokens = 800 }: Cha
     } catch { /* fall through to Pollinations */ }
   }
   // Path 2: free Pollinations.ai fallback (no key, no signup).
-  return pollinationsChat(messages);
+  return pollinationsChat(messages, effectiveSeed);
 }
 
 // ---------- Sermon outline stub ----------
-export async function sermonOutline(topic: string, scripture?: string): Promise<string> {
+export type OutlineVariant = "short" | "medium" | "long";
+export type MinutesPreset = 5 | 10 | 15 | 30 | 45 | 60;
+
+const VARIANT_WORDS: Record<OutlineVariant, number> = { short: 280, medium: 700, long: 1500 };
+
+export async function sermonOutline(topic: string, scripture?: string, variant: OutlineVariant = "medium", minutes?: MinutesPreset): Promise<string> {
+  const minutesHint = minutes ? ` The sermon should comfortably fill about ${minutes} minutes when preached (≈${Math.max(120, Math.round(minutes * 130))} spoken words, ≈${Math.round(minutes * 1.2)} main points).` : "";
   const sys: ChatMessage = {
     role: "system",
-    content: "You are a thoughtful, warm pastor's assistant. Create sermon outlines that are biblically grounded, practically applicable, and easy to preach. Use clear sections."
+    content: `You are a thoughtful, warm pastor's assistant. Create sermon outlines that are biblically grounded, practically applicable, and easy to preach. Use clear sections. Length: about ${VARIANT_WORDS[variant]} words total.`
   };
   const user: ChatMessage = {
     role: "user",
-    content: `Create a sermon outline on the topic: "${topic}".${scripture ? ` Anchor in ${scripture}.` : ""} Format: 1) Big idea (1 sentence), 2) 3–4 main points with brief scripture references, 3) One illustration idea per point, 4) Practical application, 5) Closing prayer prompt.`
+    content: `Create a ${variant} sermon outline on the topic: "${topic}".${scripture ? ` Anchor in ${scripture}.` : ""}${minutesHint} Format: 1) Big idea (1 sentence), 2) main points with brief scripture references, 3) one illustration idea per point, 4) practical application, 5) closing prayer prompt.`
   };
-  return chat({ messages: [sys, user], temperature: 0.6, maxTokens: 900 });
+  const maxTokens = variant === "long" ? 1800 : variant === "medium" ? 1000 : 450;
+  const temp = minutes && minutes >= 30 ? 0.55 : 0.65;
+  return chat({ messages: [sys, user], temperature: temp, maxTokens, seed: hashStringSeed(topic.toLowerCase() + "|" + variant + "|" + (minutes ?? 0)) });
 }
 
 // ---------- Suggest Bible references from a sermon title ----------
@@ -70,33 +91,36 @@ export interface ScriptureSuggestion { reference: string; why: string }
 
 // language: 'en' = English suggestions (English "why"), 'te' = Telugu suggestions (Telugu "why"),
 // 'mixed' = reference in English (canonical), "why" in Telugu.
-export async function suggestScripture(title: string, language: "en" | "te" | "mixed" = "en"): Promise<ScriptureSuggestion[]> {
+export async function suggestScripture(title: string, language: "en" | "te" | "mixed" = "en", opts?: { seed?: number }): Promise<ScriptureSuggestion[]> {
   const t = title.trim();
   if (!t) return [];
+  const seed = opts?.seed ?? hashStringSeed(t.toLowerCase() + "|sc");
   const sys: ChatMessage = {
     role: "system",
     content:
       language === "te"
-        ? "మీరు ఒక జాగ్రత్తగా, బైబిల్ పరిజ్ఞానం గల పాస్టర్ సహాయకుడు. ప్రవచన శీర్షిక ఇవ్వబడితే, 1 నుండి 3 బైబిల్ వచన సూచనలను అందించండి. ప్రతి దానికి, ఈ JSON ఆబ్జెక్ట్‌ను దాని స్వంత లైన్‌లో రాయండి: {\"reference\":\"Book Ch:V-V\",\"why\":\"ఒక చిన్న తెలుగు వాక్యం\"}. ప్రసిద్ధ వచనాలను ఉపయోగించండి. JSON లైన్‌లను మాత్రమే రాయండి, ఇతర వ్యాఖ్యానం ఉండకూడదు."
+        ? "మీరు ఒక జాగ్రత్తగా, బైబిల్ పరిజ్ఞానం గల పాస్టర్ సహాయకుడు. ప్రవచన శీర్షిక ఇవ్వబడితే, ఆ శీర్షికకు *నేరుగా సంబంధించిన* 1 నుండి 3 బైబిల్ వచన సూచనలను మాత్రమే ఇవ్వండి — కేవలం కీవర్డ్‌కు కాదు, ఆ శీర్షిక యొక్క నిర్దిష్ట అర్థానికి సంబంధించినవి. ప్రతి దానికి, ఈ JSON ఆబ్జెక్ట్‌ను దాని స్వంత లైన్‌లో రాయండి: {\"reference\":\"Book Ch:V-V\",\"why\":\"ఒక చిన్న తెలుగు వాక్యం\"}. ప్రసిద్ధ వచనాలను ఉపయోగించండి. JSON లైన్‌లను మాత్రమే రాయండి, ఇతర వ్యాఖ్యానం ఉండకూడదు."
         : language === "mixed"
-        ? "You are a careful, biblically literate pastor's assistant. Given a sermon title, suggest 1 to 3 Bible references. The 'reference' field MUST be in standard English format (e.g. 'John 3:16'). The 'why' field MUST be in Telugu (తెలుగు). Reply ONLY with JSON objects, one per line: {\"reference\":\"Book Ch:V-V\",\"why\":\"తెలుగు వాక్యం\"}. No commentary."
-        : "You are a careful, biblically literate pastor's assistant. Given a sermon title, suggest 1 to 3 Bible references that directly connect to the topic. For each, reply with JSON object on its own line: {\"reference\":\"Book Ch:V-V\",\"why\":\"one short sentence\"}. Use widely-known passages. Reply ONLY with the JSON lines, no commentary."
+        ? "You are a careful, biblically literate pastor's assistant. Given a sermon title, suggest 1 to 3 Bible references that *directly* relate to THIS title's specific meaning (not just the keyword). The 'reference' field MUST be in standard English format (e.g. 'John 3:16'). The 'why' field MUST be in Telugu (తెలుగు). Reply ONLY with JSON objects, one per line: {\"reference\":\"Book Ch:V-V\",\"why\":\"తెలుగు వాక్యం\"}. No commentary."
+        : "You are a careful, biblically literate pastor's assistant. Given a sermon title, suggest 1 to 3 Bible references that *directly* relate to THIS title's specific meaning — not just the keyword. For each, reply with JSON object on its own line: {\"reference\":\"Book Ch:V-V\",\"why\":\"one short sentence\"}. Use widely-known passages. Reply ONLY with the JSON lines, no commentary."
   };
   const user: ChatMessage = { role: "user", content: `Sermon title: "${t}"\nConnected Bible references (JSON lines):` };
-  const out = await chat({ messages: [sys, user], temperature: 0.4, maxTokens: 300 });
+  const out = await chat({ messages: [sys, user], temperature: 0.7, maxTokens: 400, seed });
   const parsed: ScriptureSuggestion[] = [];
   for (const line of out.split(/\n+/)) {
     const m = line.match(/\{[^}]*"reference"\s*:\s*"([^"]+)"[^}]*"why"\s*:\s*"([^"]+)"[^}]*\}/);
     if (m) parsed.push({ reference: m[1], why: m[2] });
   }
   if (parsed.length) return parsed.slice(0, 3);
-  // Fallback: rule-based stub by keyword.
-  return stubScripture(t, language);
+  // Fallback: rule-based stub by keyword (diversified via title hash).
+  return stubScripture(t, language, seed);
 }
 
 // Keyword-based stub for when no AI is configured.
 // Returns English/Telugu/bilingual suggestions based on the language flag.
-function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): ScriptureSuggestion[] {
+// Uses the `seed` param to rotate through each topic's sub-pool so different titles
+// that share a keyword (e.g. two sermons about "love") don't get the same triple.
+function stubScripture(title: string, language: "en" | "te" | "mixed" = "en", seed: number = hashStringSeed(title.toLowerCase())): ScriptureSuggestion[] {
   const t = title.toLowerCase();
   // Internal row type: each entry carries both English and Telugu reason strings.
   // The final mapped return is the public ScriptureSuggestion shape.
@@ -111,11 +135,17 @@ function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): S
     { keywords: ["love", "ప్రేమ", "beloved"], suggestions: [
       { reference: "1 Corinthians 13:4-7", whyEn: "The shape of love.", whyTe: "ప్రేమ యొక్క రూపం." },
       { reference: "John 3:16", whyEn: "God's love for the world.", whyTe: "దేవుడు లోకాన్ని ప్రేమించాడు." },
-      { reference: "1 John 4:8", whyEn: "God is love.", whyTe: "దేవుడే ప్రేమ." }
+      { reference: "1 John 4:8", whyEn: "God is love.", whyTe: "దేవుడే ప్రేమ." },
+      { reference: "John 13:34", whyEn: "A new commandment: love one another.", whyTe: "కొత్త ఆజ్ఞ: ఒకరిని ఒకరు ప్రేమించుడి." },
+      { reference: "Romans 8:38-39", whyEn: "Nothing can separate us from God's love.", whyTe: "దేవుని ప్రేమ నుండి మనలను ఏదీ వేరుచేయదు." },
+      { reference: "1 John 4:19", whyEn: "We love because He first loved us.", whyTe: "ఆయన మనలను మొదట ప్రేమించినందున మనము ప్రేమించుచున్నాము." }
     ]},
     { keywords: ["faith", "trust", "believe", "విశ్వాసం", "నమ్మకం"], suggestions: [
       { reference: "Hebrews 11:1", whyEn: "Faith is the substance of things hoped for.", whyTe: "విశ్వాసం ఆశించిన వాటికి ఆధారం." },
-      { reference: "Romans 10:17", whyEn: "Faith comes by hearing the word.", whyTe: "విశ్వాసం వాక్యం వినుటవల్ల వస్తుంది." }
+      { reference: "Romans 10:17", whyEn: "Faith comes by hearing the word.", whyTe: "విశ్వాసం వాక్యం వినుటవల్ల వస్తుంది." },
+      { reference: "Mark 11:22-24", whyEn: "Have faith in God; ask and receive.", whyTe: "దేవునియందు విశ్వాసముంచుడి; అడిగినది పొందుడి." },
+      { reference: "2 Corinthians 5:7", whyEn: "We walk by faith, not by sight.", whyTe: "కనులతో కాదు, విశ్వాసముతో నడుచుచున్నాము." },
+      { reference: "Ephesians 2:8-9", whyEn: "Saved by grace through faith.", whyTe: "కృప ద్వారా విశ్వాసముతో రక్షింపబడ్డాము." }
     ]},
     { keywords: ["hope", "నిరీక్షణ"], suggestions: [
       { reference: "Romans 15:13", whyEn: "God of hope who fills with joy and peace.", whyTe: "నిరీక్షణ దేవుడు సంతోషమును, సమాధానమును నింపును." },
@@ -123,7 +153,10 @@ function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): S
     ]},
     { keywords: ["prayer", "pray", "intercession", "ప్రార్థన"], suggestions: [
       { reference: "Philippians 4:6-7", whyEn: "Prayer with thanksgiving brings peace.", whyTe: "కృతజ్ఞతలతో ప్రార్థన చేయుట సమాధానమిచ్చును." },
-      { reference: "Matthew 6:9-13", whyEn: "The Lord's Prayer as a template.", whyTe: "ప్రభువు ప్రార్థన ఆదర్శం." }
+      { reference: "Matthew 6:9-13", whyEn: "The Lord's Prayer as a template.", whyTe: "ప్రభువు ప్రార్థన ఆదర్శం." },
+      { reference: "James 5:16", whyEn: "The prayer of the righteous is powerful.", whyTe: "నీతిమంతుని ప్రార్థన బలమైనది." },
+      { reference: "1 Thessalonians 5:17", whyEn: "Pray without ceasing.", whyTe: "అవిచ్ఛిన్నముగా ప్రార్థన చేయుడి." },
+      { reference: "John 14:13-14", whyEn: "Ask in Jesus' name and receive.", whyTe: "నా నామమునందు అడగండి, చేసెదను." }
     ]},
     { keywords: ["fear", "anxiety", "worry", "anxious", "భయం", "ఆందోళన"], suggestions: [
       { reference: "Isaiah 41:10", whyEn: "Do not fear, for I am with you.", whyTe: "భయపడకుము, నేను నీతో ఉన్నాను." },
@@ -144,7 +177,9 @@ function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): S
     ]},
     { keywords: ["worship", "praise", "స్తుతి", "ఆరాధన"], suggestions: [
       { reference: "Psalm 100", whyEn: "Make a joyful noise to the Lord.", whyTe: "సంతోష ధ్వనితో ప్రభువును స్తుతించుడి." },
-      { reference: "John 4:24", whyEn: "Worship in spirit and truth.", whyTe: "ఆత్మలో సత్యములో ఆరాధించుడి." }
+      { reference: "John 4:24", whyEn: "Worship in spirit and truth.", whyTe: "ఆత్మలో సత్యములో ఆరాధించుడి." },
+      { reference: "Psalm 29:2", whyEn: "Worship the Lord in the beauty of holiness.", whyTe: "పరిశుద్ధత కాంతిలో ప్రభువును ఆరాధించుడి." },
+      { reference: "Romans 12:1", whyEn: "Present your bodies as a living sacrifice — true worship.", whyTe: "సజీవమైన యజ్ఞముగా మీ శరీరములను అర్పించుడి — ఇది మీ ఆరాధన." }
     ]},
     { keywords: ["spirit", "holy spirit", "pentecost", "ఆత్మ", "పరిశుద్ధాత్మ"], suggestions: [
       { reference: "Acts 2", whyEn: "The Spirit poured out at Pentecost.", whyTe: "పెంతెకోస్తునాడు ఆత్మ కుమ్మరించబడెను." },
@@ -175,20 +210,32 @@ function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): S
     }
   }
   if (out.length === 0) {
-    if (isTeluguTitle) {
-      return [
-        { reference: "John 3:16", why: "దేవుడు లోకాన్ని ప్రేమించాడు." },
-        { reference: "Romans 8:28", why: "సమస్తం మంచిగా కలిసి పనిచేయును." },
-        { reference: "Philippians 4:13", why: "క్రీస్తు ద్వారా సమస్తమును చేయగలను." }
-      ];
-    }
-    return [
-      { reference: "John 3:16", why: "God's love for the world." },
-      { reference: "Romans 8:28", why: "God works all things for good." },
-      { reference: "Philippians 4:13", why: "Strength through Christ." }
+    // Universal fallback pool (varied so different titles get different triples).
+    const universalPool = [
+      { reference: "John 3:16", whyEn: "God's love for the world.", whyTe: "దేవుడు లోకాన్ని ప్రేమించాడు." },
+      { reference: "Romans 8:28", whyEn: "God works all things for good.", whyTe: "సమస్తం మంచిగా కలిసి పనిచేయును." },
+      { reference: "Philippians 4:13", whyEn: "Strength through Christ.", whyTe: "క్రీస్తు ద్వారా సమస్తమును చేయగలను." },
+      { reference: "Jeremiah 29:11", whyEn: "Plans to prosper and not to harm you.", whyTe: "మిమ్మును శ్రేయస్సుకు బాగుచేయ నిశ్చయించియున్నాడు." },
+      { reference: "Psalm 23:1", whyEn: "The Lord is my shepherd.", whyTe: "ప్రభువు నా కాపరి." },
+      { reference: "Proverbs 3:5-6", whyEn: "Trust the Lord with all your heart.", whyTe: "నీ హృదయమంతయు నిన్ను నమ్ముకొనుము." },
+      { reference: "Isaiah 41:10", whyEn: "Do not fear, for I am with you.", whyTe: "భయపడకుము, నేను నీతో ఉన్నాను." },
+      { reference: "Matthew 11:28", whyEn: "Come to me, all who are weary.", whyTe: "ఎల్ల పరిశ్రములు గలవారు నా యొద్దకు వచ్చుడి." },
+      { reference: "2 Timothy 1:7", whyEn: "God gave us a spirit of power, not fear.", whyTe: "దేవుడు మనకు భయముకాక, బలమును ప్రేమను, ఆత్మ స్వస్థతను దయచేసెను." }
     ];
+    const offset = seed % universalPool.length;
+    const rotated = [...universalPool.slice(offset), ...universalPool.slice(0, offset)].slice(0, 3);
+    if (isTeluguTitle || language === "te") {
+      return rotated.map((s) => ({ reference: s.reference, why: s.whyTe }));
+    }
+    if (language === "mixed") {
+      return rotated.map((s) => ({ reference: s.reference, why: s.whyTe }));
+    }
+    return rotated.map((s) => ({ reference: s.reference, why: s.whyEn }));
   }
-  return out.slice(0, 3).map((s) => {
+  // Diversify: rotate the matched pool by `seed % length` so different titles get different triples.
+  const offset = seed % Math.max(out.length, 1);
+  const rotated = [...out.slice(offset), ...out.slice(0, offset)].slice(0, 3);
+  return rotated.map((s) => {
     const reason = language === "te" ? s.whyTe : language === "mixed" ? s.whyTe : s.whyEn;
     return { reference: s.reference, why: reason };
   });

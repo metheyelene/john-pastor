@@ -17,6 +17,7 @@ import FollowUp from "./pages/FollowUp";
 import Finance from "./pages/Finance";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
+import AIChat from "./pages/AIChat";
 import { getProfile } from "./db";
 import NotificationPermissionPrompt from "./components/NotificationPermissionPrompt";
 import { redGlow, jPulse } from "./animations";
@@ -57,7 +58,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/members" element={<Members />} />
-            <Route path="/prayer" element={<Prayer />} />
+            <Route path="/prayer-requests" element={<Prayer />} />
             <Route path="/sermon-notes" element={<SermonNotes />} />
             <Route path="/sermon-assistant" element={<SermonAssistant />} />
             <Route path="/past-sermons" element={<PastSermons />} />
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="/finance" element={<Finance />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/ai-chat" element={<AIChat />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AnimatePresence>

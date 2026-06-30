@@ -1,4 +1,4 @@
-import { Box, Grid, Typography, Stack, Chip } from "@mui/material";
+import { Box, Grid, Typography, Stack, Chip, Avatar } from "@mui/material";
 import { useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -17,8 +17,9 @@ import { verseOfTheDay } from "../bible";
 import { useTranslation } from "react-i18next";
 
 const QUICK = [
+  { to: "/ai-chat", icon: <AutoAwesomeIcon />, labelKey: "askAI", color: "#dc2626" },
   { to: "/members", icon: <PeopleIcon />, labelKey: "members", color: "#ffb74d" },
-  { to: "/prayer", icon: <FavoriteIcon />, labelKey: "prayer", color: "#ec407a" },
+  { to: "/prayer-requests", icon: <FavoriteIcon />, labelKey: "prayerRequests", color: "#ec407a" },
   { to: "/sermon-notes", icon: <MenuBookIcon />, labelKey: "sermonNotes", color: "#66bb6a" },
   { to: "/sermon-assistant", icon: <AutoAwesomeIcon />, labelKey: "sermonAssistant", color: "#ab47bc" },
   { to: "/events", icon: <EventIcon />, labelKey: "events", color: "#42a5f5" },
@@ -48,10 +49,21 @@ export default function Dashboard() {
   return (
     <Box>
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-        <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
-          {profile?.pastorName ? t("welcome", { name: profile.pastorName }) : t("appName")}
-        </Typography>
-        <Typography variant="body2" sx={{ opacity: 0.7, mb: 3 }}>{t("tagline")}</Typography>
+        <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 0.5 }}>
+          {profile?.photoDataUrl ? (
+            <Avatar src={profile.photoDataUrl} sx={{ width: 56, height: 56, border: "2px solid rgba(255,255,255,0.12)", cursor: "pointer" }} onClick={() => nav("/profile")} />
+          ) : (
+            <Avatar onClick={() => nav("/profile")} sx={{ width: 56, height: 56, fontWeight: 700, fontSize: "1.25rem", cursor: "pointer", background: "linear-gradient(135deg, #dc2626, #ef4444)" }}>
+              {(profile?.pastorName?.[0] ?? "J").toUpperCase()}
+            </Avatar>
+          )}
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="h4" sx={{ fontWeight: 700, lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {profile?.pastorName ? t("welcome", { name: profile.pastorName }) : t("appName")}
+            </Typography>
+            <Typography variant="body2" sx={{ opacity: 0.7 }}>{t("tagline")}</Typography>
+          </Box>
+        </Stack>
       </motion.div>
 
       <AnimatedCard sx={{ p: 3, mb: 3, background: "linear-gradient(135deg, rgba(255,183,77,0.18), rgba(236,64,122,0.18))" }}>

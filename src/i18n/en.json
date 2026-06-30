@@ -1,10 +1,12 @@
 {
-  "appName": "John",
+  "appName": "JOHN AI",
+  "askAI": "Ask JOHN AI",
   "welcome": "Welcome, Pastor {{name}}",
   "tagline": "Your daily ministry companion",
   "dashboard": "Home",
   "members": "Members",
   "prayer": "Prayer",
+  "prayerRequests": "Prayer Requests",
   "sermonNotes": "Sermon Notes",
   "sermonAssistant": "Sermon Helper",
   "pastSermons": "Past Sermons",
