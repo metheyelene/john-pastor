@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">John</string>
+    <string name="title_activity_main">John</string>
+    <string name="package_name">app.john.pastor</string>
+    <string name="custom_url_scheme">app.john.pastor</string>
+</resources>
