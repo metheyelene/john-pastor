@@ -3,7 +3,6 @@ import type { SermonNote, Profile } from "../db";
 
 // Build a PowerPoint file from a SermonNote. Returns a Blob the caller can trigger as a download.
 // Layout: 16:9 widescreen, dark background (matches John's theme), warm-gold accents.
-// Each sermon section gets its own slide so the pastor can present from any device that opens .pptx.
 
 const SLIDE_BG = "0a0a23";
 const SLIDE_FG = "f5f5fa";
@@ -13,9 +12,8 @@ const SLIDE_SECONDARY = "ec407a";
 function addBaseSlide(pptx: PptxGenJS, title?: string) {
   const slide = pptx.addSlide();
   slide.background = { color: SLIDE_BG };
-  // Subtle diagonal accent strip on the left edge
   slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 0.18, h: 5.625,
+    x: 0, y: 0, w: 0.18, h: 7.5,
     fill: { color: SLIDE_ACCENT }, line: { color: SLIDE_ACCENT }
   });
   if (title) {
@@ -26,15 +24,6 @@ function addBaseSlide(pptx: PptxGenJS, title?: string) {
     });
   }
   return slide;
-}
-
-function addBodyText(slide: ReturnType<PptxGenJS["addSlide"]>, body: string, opts?: { big?: boolean }) {
-  slide.addText(body, {
-    x: 0.7, y: opts?.big ? 1.5 : 1.4, w: 11.6, h: opts?.big ? 4.0 : 3.8,
-    fontSize: opts?.big ? 36 : 22, fontFace: "Inter", color: SLIDE_FG,
-    bold: !!opts?.big, valign: "middle", align: "left",
-    lineSpacingMultiple: 1.4, fit: "shrink"
-  });
 }
 
 export async function exportSermonToPptx(note: SermonNote, profile?: Profile | null): Promise<Blob> {
@@ -62,13 +51,15 @@ export async function exportSermonToPptx(note: SermonNote, profile?: Profile | n
   if (profile?.pastorName) {
     titleSlide.addText(profile.pastorName, {
       x: 0.7, y: 6.4, w: 11.6, h: 0.4,
-      fontSize: 14, color: SLIDE_FG, fontFace: "Inter", opacity: 0.7
+      fontSize: 14, color: SLIDE_FG, fontFace: "Inter",
+      transparency: 30 // 30% transparent
     });
   }
 
   // 2. Scripture slide
   if (note.scripture) {
-    addBaseSlide(pptx, "SCRIPTURE").addText(note.scripture, {
+    const s = addBaseSlide(pptx, "SCRIPTURE");
+    s.addText(note.scripture, {
       x: 0.7, y: 2.4, w: 11.6, h: 3.0,
       fontSize: 32, color: SLIDE_FG, fontFace: "Georgia", italic: true,
       align: "center", valign: "middle", lineSpacingMultiple: 1.5
@@ -77,26 +68,24 @@ export async function exportSermonToPptx(note: SermonNote, profile?: Profile | n
 
   // 3. Intro slide
   if (note.intro) {
-    addBaseSlide(pptx, "INTRODUCTION");
-    addBodyText(addBaseSlide(pptx), note.intro);
-    // The above call created an empty slide (no title set). Build it properly:
-    // Workaround: the previous addBodyText also added a slide. Remove and rebuild correctly.
-    pptx.slides.splice(-1, 1);
     const s = addBaseSlide(pptx, "INTRODUCTION");
-    addBodyText(s, note.intro);
+    s.addText(note.intro, {
+      x: 0.7, y: 1.4, w: 11.6, h: 5.5,
+      fontSize: 22, color: SLIDE_FG, fontFace: "Inter",
+      valign: "middle", lineSpacingMultiple: 1.4, fit: "shrink"
+    });
   }
 
-  // 4. Each point + illustration on its own slide (or combined if short)
+  // 4. Each point + illustration on its own slide
   (note.points ?? []).forEach((point, i) => {
     const illustration = note.illustrations?.[i];
     const s = addBaseSlide(pptx, `POINT ${i + 1}`);
     s.addText(point, {
       x: 0.7, y: illustration ? 1.6 : 2.4, w: 11.6, h: illustration ? 2.4 : 3.0,
       fontSize: 32, color: SLIDE_FG, fontFace: "Inter", bold: true,
-      align: "left", valign: "middle", lineSpacingMultiple: 1.3, fit: "shrink"
+      valign: "middle", lineSpacingMultiple: 1.3, fit: "shrink"
     });
     if (illustration) {
-      // Hairline divider
       s.addShape(pptx.ShapeType.line, {
         x: 0.7, y: 4.2, w: 11.6, h: 0,
         line: { color: SLIDE_ACCENT, width: 1 }
@@ -119,14 +108,18 @@ export async function exportSermonToPptx(note: SermonNote, profile?: Profile | n
     s.addText(note.application, {
       x: 0.7, y: 2.0, w: 11.6, h: 4.0,
       fontSize: 26, color: SLIDE_FG, fontFace: "Inter",
-      align: "left", valign: "middle", lineSpacingMultiple: 1.4, fit: "shrink"
+      valign: "middle", lineSpacingMultiple: 1.4, fit: "shrink"
     });
   }
 
   // 6. Closing
   if (note.closing) {
     const s = addBaseSlide(pptx, "CLOSING");
-    addBodyText(s, note.closing);
+    s.addText(note.closing, {
+      x: 0.7, y: 1.4, w: 11.6, h: 5.5,
+      fontSize: 22, color: SLIDE_FG, fontFace: "Inter",
+      valign: "middle", lineSpacingMultiple: 1.4, fit: "shrink"
+    });
   }
 
   // 7. Closing prayer
@@ -135,7 +128,7 @@ export async function exportSermonToPptx(note: SermonNote, profile?: Profile | n
     s.addText(note.prayer, {
       x: 0.7, y: 2.4, w: 11.6, h: 3.4,
       fontSize: 22, color: SLIDE_FG, fontFace: "Georgia", italic: true,
-      align: "left", valign: "middle", lineSpacingMultiple: 1.5, fit: "shrink"
+      valign: "middle", lineSpacingMultiple: 1.5, fit: "shrink"
     });
   }
 
