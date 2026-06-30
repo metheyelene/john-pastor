@@ -157,15 +157,15 @@ function stubScripture(title: string, language: "en" | "te" | "mixed" = "en"): S
   if (out.length === 0) {
     if (isTeluguTitle) {
       return [
-        { reference: "John 3:16", whyTe: "దేవుడు లోకాన్ని ప్రేమించాడు." },
-        { reference: "Romans 8:28", whyTe: "సమస్తం మంచిగా కలిసి పనిచేయును." },
-        { reference: "Philippians 4:13", whyTe: "క్రీస్తు ద్వారా సమస్తమును చేయగలను." }
+        { reference: "John 3:16", why: "దేవుడు లోకాన్ని ప్రేమించాడు." },
+        { reference: "Romans 8:28", why: "సమస్తం మంచిగా కలిసి పనిచేయును." },
+        { reference: "Philippians 4:13", why: "క్రీస్తు ద్వారా సమస్తమును చేయగలను." }
       ];
     }
     return [
-      { reference: "John 3:16", whyEn: "God's love for the world." },
-      { reference: "Romans 8:28", whyEn: "God works all things for good." },
-      { reference: "Philippians 4:13", whyEn: "Strength through Christ." }
+      { reference: "John 3:16", why: "God's love for the world." },
+      { reference: "Romans 8:28", why: "God works all things for good." },
+      { reference: "Philippians 4:13", why: "Strength through Christ." }
     ];
   }
   return out.slice(0, 3).map((s) => {
