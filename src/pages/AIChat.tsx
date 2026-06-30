@@ -1,4 +1,4 @@
-import { Box, Stack, TextField, Typography, IconButton, CircularProgress, Chip, Tooltip } from "@mui/material";
+import { Box, Stack, TextField, Typography, IconButton, CircularProgress, Chip, Tooltip, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -9,6 +9,7 @@ import GlassyButton from "../components/GlassyButton";
 import AnimatedCard from "../components/AnimatedCard";
 import { chat, hashStringSeed } from "../ai";
 import { getProfile } from "../db";
+import { useVisualViewport } from "../lib/useVisualViewport";
 import { useTranslation } from "react-i18next";
 
 interface ChatTurn { role: "user" | "assistant"; content: string; ts: number }
@@ -46,7 +47,11 @@ export default function AIChatPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [pastorName, setPastorName] = useState("");
+  const [language, setLanguage] = useState<"en" | "te" | "mixed">("en");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Shrink the chat container with the soft keyboard so the input stays visible.
+  const visualHeight = useVisualViewport();
 
   useEffect(() => { setTurns(loadHistory()); }, []);
   useEffect(() => { saveHistory(turns); }, [turns]);
@@ -85,7 +90,8 @@ export default function AIChatPage() {
         ],
         temperature: 0.75,
         maxTokens: 700,
-        seed: hashStringSeed(text + Date.now().toString().slice(0, -3))
+        seed: hashStringSeed(text + Date.now().toString().slice(0, -3)),
+        language
       });
       setTurns((cur) => [...cur, { role: "assistant", content: reply, ts: Date.now() }]);
     } catch (e: any) {
@@ -99,8 +105,17 @@ export default function AIChatPage() {
   };
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", height: "calc(100vh - 140px)" }}>
-      <Stack direction="row" alignItems="center" sx={{ mb: 2, gap: 1.5 }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        // Use the live visualViewport height so the box shrinks when the soft keyboard opens.
+        // Fallback to 100dvh (modern, well-supported) for browsers without visualViewport.
+        height: { xs: `${visualHeight - 56 - 60}px`, md: "calc(100dvh - 140px)" },
+        transition: "height 120ms ease"
+      }}
+    >
+      <Stack direction="row" alignItems="center" sx={{ mb: 2, gap: 1.5, flexWrap: "wrap" }}>
         <Box sx={{
           width: 44, height: 44, borderRadius: 2.5,
           display: "grid", placeItems: "center",
@@ -109,12 +124,25 @@ export default function AIChatPage() {
         }}>
           <AutoAwesomeIcon sx={{ fontSize: 24 }} />
         </Box>
-        <Box sx={{ flex: 1 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h5" sx={{ fontWeight: 700, lineHeight: 1.1 }}>Ask JOHN AI</Typography>
           <Typography variant="caption" sx={{ color: "text.secondary" }}>
             Free, private, runs on your device's AI (Pollinations → Groq → offline stub)
           </Typography>
         </Box>
+        <Tooltip title="Reply language">
+          <ToggleButtonGroup
+            size="small"
+            value={language}
+            exclusive
+            onChange={(_, v) => v && setLanguage(v)}
+            sx={{ "& .MuiToggleButton-root": { px: 1.25, py: 0.4, fontSize: "0.6875rem", fontWeight: 700, letterSpacing: 0.5 } }}
+          >
+            <ToggleButton value="en">EN</ToggleButton>
+            <ToggleButton value="te">తె</ToggleButton>
+            <ToggleButton value="mixed">BOTH</ToggleButton>
+          </ToggleButtonGroup>
+        </Tooltip>
         <Tooltip title="Clear conversation">
           <IconButton onClick={clearChat} aria-label="clear chat"><DeleteOutlineIcon /></IconButton>
         </Tooltip>
@@ -192,11 +220,16 @@ export default function AIChatPage() {
             fullWidth
             multiline
             maxRows={5}
-            placeholder="Ask anything: sermon ideas, counseling approach, outreach, prayers…"
+            inputRef={inputRef}
+            placeholder={`Ask anything in ${language === "te" ? "Telugu" : language === "mixed" ? "English or Telugu" : "English"}…`}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !busy) { e.preventDefault(); send(); }
+            }}
+            onFocus={() => {
+              // Scroll input into view above the keyboard.
+              setTimeout(() => inputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
             }}
             disabled={busy}
           />

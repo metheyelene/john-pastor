@@ -206,7 +206,12 @@ export default function BiblePage() {
         <Select displayEmpty value={bookEn} onChange={(e) => { setBookEn(e.target.value as string); setChapter(1); setVerse(1); }} sx={{ minWidth: 180, flex: 1 }}>
           {bookOptions.map((b) => <MenuItem key={b} value={b}>{b}</MenuItem>)}
         </Select>
-        <Select value={chapter} onChange={(e) => { setChapter(Number(e.target.value)); setVerse(1); }} sx={{ minWidth: 110 }}>
+        <Select value={chapter} onChange={(e) => {
+          const newCh = Number(e.target.value);
+          const maxV = currentBook?.chapters?.find((c) => c.chapter === newCh)?.verses.length ?? 0;
+          setChapter(newCh);
+          setVerse(verse > maxV ? 1 : verse);
+        }} sx={{ minWidth: 110 }}>
           {Array.from({ length: Math.max(chapterCount, 1) }, (_, i) => i + 1).map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
         </Select>
         <Select value={verse} onChange={(e) => setVerse(Number(e.target.value))} sx={{ minWidth: 100 }}>

@@ -11,6 +11,16 @@ interface ChatOptions {
   maxTokens?: number;
   /** Per-request seed. Default: stable hash of the prompt so identical inputs give identical outputs (deterministic across reloads); callers can pass Math.random() for fresh variation. */
   seed?: number;
+  /** When set, chat() prepends a language instruction so the model replies in the chosen language. */
+  language?: "en" | "te" | "mixed";
+}
+
+function languageDirective(language: "en" | "te" | "mixed"): string {
+  return language === "te"
+    ? "IMPORTANT: Reply ENTIRELY in Telugu (తెలుగు). Scripture references should stay in canonical English format (e.g. 'John 3:16') so they're searchable, but all explanations, commentary, and narrative MUST be in Telugu."
+    : language === "mixed"
+    ? "IMPORTANT: Use bilingual output. Scripture references in canonical English (e.g. 'John 3:16'). Section headers and short labels in English. Explanations, illustrations, and longer prose in Telugu (తెలుగు)."
+    : "IMPORTANT: Reply in clear, natural English.";
 }
 
 export function hashStringSeed(s: string): number {
@@ -38,10 +48,18 @@ async function pollinationsChat(messages: ChatMessage[], seed: number): Promise<
   }
 }
 
-export async function chat({ messages, temperature = 0.75, maxTokens = 800, seed }: ChatOptions): Promise<string> {
+export async function chat({ messages, temperature = 0.75, maxTokens = 800, seed, language }: ChatOptions): Promise<string> {
   // Default to a stable hash of the prompt so re-running the same sermon title is deterministic
   // (caller can pass an explicit seed for variety, e.g. chat re-rolls).
-  const effectiveSeed = seed ?? hashStringSeed(messages.map((m) => m.content).join("|") + `|t=${temperature}`);
+  const effectiveSeed = seed ?? hashStringSeed(messages.map((m) => m.content).join("|") + `|t=${temperature}` + (language ? `|l=${language}` : ""));
+  // If a language hint is set, prepend a directive to the system message (or add one if absent).
+  const enrichedMessages: ChatMessage[] = language
+    ? [
+        { role: "system", content: languageDirective(language) },
+        ...messages.filter((m) => m.role !== "system"),
+        ...(messages.some((m) => m.role === "system") ? [{ role: "system" as const, content: messages.find((m) => m.role === "system")!.content }] : [])
+      ]
+    : messages;
   const s = await getSettings();
   // Path 1: user-configured OpenAI-compatible provider.
   if (s.aiProvider && s.aiApiKey) {
@@ -51,7 +69,7 @@ export async function chat({ messages, temperature = 0.75, maxTokens = 800, seed
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${s.aiApiKey}` },
         body: JSON.stringify({
           model: s.aiModel || "gpt-4o-mini",
-          messages, temperature, max_tokens: maxTokens, seed: effectiveSeed,
+          messages: enrichedMessages, temperature, max_tokens: maxTokens, seed: effectiveSeed,
           stream: false
         })
       });
@@ -62,28 +80,117 @@ export async function chat({ messages, temperature = 0.75, maxTokens = 800, seed
     } catch { /* fall through to Pollinations */ }
   }
   // Path 2: free Pollinations.ai fallback (no key, no signup).
-  return pollinationsChat(messages, effectiveSeed);
+  return pollinationsChat(enrichedMessages, effectiveSeed);
 }
 
-// ---------- Sermon outline stub ----------
+// ---------- Sermon outline ----------
 export type OutlineVariant = "short" | "medium" | "long";
 export type MinutesPreset = 5 | 10 | 15 | 30 | 45 | 60;
+export type OutlineLanguage = "en" | "te" | "mixed";
 
 const VARIANT_WORDS: Record<OutlineVariant, number> = { short: 280, medium: 700, long: 1500 };
 
-export async function sermonOutline(topic: string, scripture?: string, variant: OutlineVariant = "medium", minutes?: MinutesPreset): Promise<string> {
+export interface OutlinePoint { title: string; scripture: string; content: string; illustration: string }
+export interface OutlineData {
+  bigIdea: string;
+  points: OutlinePoint[];
+  application: string;
+  closingPrayer: string;
+}
+
+const STRUCTURED_FORMAT_INSTRUCTION = `Reply with EXACTLY this structure (no extra prose, no commentary, no preamble):
+
+BIG IDEA: [one sentence — the central truth of the sermon, 12-25 words]
+
+POINT 1: [short title, 3-8 words]
+SCRIPTURE: [book chapter:verse]
+CONTENT: [2-4 sentences explaining the point, grounded in the scripture above]
+ILLUSTRATION: [one concrete, vivid story idea — a real-world picture the pastor can paint]
+
+POINT 2: [short title]
+SCRIPTURE: [book chapter:verse]
+CONTENT: [2-4 sentences]
+ILLUSTRATION: [one concrete story idea]
+
+POINT 3: [short title]
+SCRIPTURE: [book chapter:verse]
+CONTENT: [2-4 sentences]
+ILLUSTRATION: [one concrete story idea]
+
+POINT 4: [short title, OPTIONAL — include only if 4 points genuinely strengthen the sermon]
+SCRIPTURE: [book chapter:verse]
+CONTENT: [2-4 sentences]
+ILLUSTRATION: [one concrete story idea]
+
+APPLICATION: [1-3 sentences — one concrete, do-this-this-week action for the listener]
+
+CLOSING PRAYER: [short pastoral prayer prompt, 2-5 sentences]`;
+
+function buildOutlinePrompt(topic: string, scripture: string | undefined, variant: OutlineVariant, minutes: MinutesPreset | undefined, language: OutlineLanguage): { sys: string; user: string } {
   const minutesHint = minutes ? ` The sermon should comfortably fill about ${minutes} minutes when preached (≈${Math.max(120, Math.round(minutes * 130))} spoken words, ≈${Math.round(minutes * 1.2)} main points).` : "";
-  const sys: ChatMessage = {
-    role: "system",
-    content: `You are a thoughtful, warm pastor's assistant. Create sermon outlines that are biblically grounded, practically applicable, and easy to preach. Use clear sections. Length: about ${VARIANT_WORDS[variant]} words total.`
+  const variantHint = variant === "short"
+    ? ` Length: ${VARIANT_WORDS.short} words total (sketch mode — 3 points only).`
+    : variant === "long"
+      ? ` Length: ${VARIANT_WORDS.long} words total (deep study — 4 points with rich illustrations).`
+      : ` Length: ${VARIANT_WORDS.medium} words total (balanced — 3-4 points).`;
+  const langSys = language === "te"
+    ? "మీరు ఒక జాగ్రత్తగా ఆలోచించే, వెచ్చని పాస్టర్ సహాయకుడు. ప్రవచన రూపకల్పనలు బైబిల్ ఆధారితమైనవి, ఆచరణాత్మకంగా వర్తించేవి, ప్రవచించడానికి సులభమైనవి."
+    : "You are a thoughtful, warm pastor's assistant. Sermon outlines you produce are biblically grounded, practically applicable, and easy to preach.";
+  const userLang = language === "te"
+    ? `దిగువ నిర్మాణంలో మాత్రమే తెలుగులో సమాధానం ఇవ్వండి: "${STRUCTURED_FORMAT_INSTRUCTION}". ప్రవచన శీర్షిక: "${topic}".${scripture ? ` ఆధార వచనం: ${scripture}.` : ""}${minutesHint}${variantHint}`
+    : `Reply with EXACTLY this structure (no extra prose, no commentary, no preamble): "${STRUCTURED_FORMAT_INSTRUCTION}". Sermon topic: "${topic}".${scripture ? ` Anchor scripture: ${scripture}.` : ""}${minutesHint}${variantHint}`;
+  return { sys: langSys, user: userLang };
+}
+
+export async function sermonOutline(
+  topic: string,
+  scripture?: string,
+  variant: OutlineVariant = "medium",
+  minutes?: MinutesPreset,
+  language: OutlineLanguage = "en"
+): Promise<string> {
+  const { sys, user } = buildOutlinePrompt(topic, scripture, variant, minutes, language);
+  const maxTokens = variant === "long" ? 2200 : variant === "medium" ? 1200 : 550;
+  const temp = minutes && minutes >= 30 ? 0.55 : 0.6;
+  return chat(
+    { messages: [{ role: "system", content: sys }, { role: "user", content: user }], temperature: temp, maxTokens,
+      seed: hashStringSeed(topic.toLowerCase() + "|" + variant + "|" + (minutes ?? 0) + "|" + language) }
+  );
+}
+
+// Parses the structured AI output into typed sections. Tolerant of minor formatting variations.
+export function parseOutline(raw: string): OutlineData {
+  const text = raw.replace(/\r/g, "");
+  const grab = (re: RegExp): string => {
+    const m = text.match(re);
+    return m ? m[1].trim() : "";
   };
-  const user: ChatMessage = {
-    role: "user",
-    content: `Create a ${variant} sermon outline on the topic: "${topic}".${scripture ? ` Anchor in ${scripture}.` : ""}${minutesHint} Format: 1) Big idea (1 sentence), 2) main points with brief scripture references, 3) one illustration idea per point, 4) practical application, 5) closing prayer prompt.`
+
+  const bigIdea = grab(/^\s*BIG IDEA:\s*(.+?)(?=\n\s*(POINT\s+\d+:|APPLICATION:|CLOSING PRAYER:|$))/im);
+
+  const pointBlocks = text.split(/\n\s*POINT\s+(\d+):/i).slice(1); // alternates: num, body, num, body, ...
+  const points: OutlinePoint[] = [];
+  for (let i = 0; i + 1 < pointBlocks.length; i += 2) {
+    const title = pointBlocks[i + 1].split("\n")[0].trim();
+    const body = pointBlocks[i + 1];
+    const scripture = (body.match(/^\s*SCRIPTURE:\s*(.+?)(?=\n\s*(CONTENT:|ILLUSTRATION:|$))/im) || ["", ""])[1].trim();
+    const content = (body.match(/^\s*CONTENT:\s*([\s\S]+?)(?=\n\s*(ILLUSTRATION:|SCRIPTURE:|APPLICATION:|CLOSING PRAYER:|$))/im) || ["", ""])[1].trim();
+    const illustration = (body.match(/^\s*ILLUSTRATION:\s*([\s\S]+?)(?=\n\s*(POINT\s+\d+:|APPLICATION:|CLOSING PRAYER:|$))/im) || ["", ""])[1].trim();
+    if (title) points.push({ title, scripture, content, illustration });
+  }
+
+  const application = grab(/^\s*APPLICATION:\s*([\s\S]+?)(?=\n\s*CLOSING PRAYER:|$)/im);
+  const closingPrayer = grab(/^\s*CLOSING PRAYER:\s*([\s\S]+?)$/im);
+
+  // Fallback: if no BIG IDEA found but there IS content, treat the first non-empty line as big idea.
+  const fallbackBigIdea = bigIdea || (points.length === 0 ? text.split("\n").find((l) => l.trim() && !l.match(/^(POINT|SCRIPTURE|CONTENT|ILLUSTRATION|APPLICATION|CLOSING PRAYER|BIG IDEA)/i)) || "" : "");
+
+  return {
+    bigIdea: fallbackBigIdea.trim(),
+    points,
+    application: application.trim(),
+    closingPrayer: closingPrayer.trim()
   };
-  const maxTokens = variant === "long" ? 1800 : variant === "medium" ? 1000 : 450;
-  const temp = minutes && minutes >= 30 ? 0.55 : 0.65;
-  return chat({ messages: [sys, user], temperature: temp, maxTokens, seed: hashStringSeed(topic.toLowerCase() + "|" + variant + "|" + (minutes ?? 0)) });
 }
 
 // ---------- Suggest Bible references from a sermon title ----------
@@ -242,7 +349,7 @@ function stubScripture(title: string, language: "en" | "te" | "mixed" = "en", se
 }
 
 // ---------- Summarizer (YouTube transcript / long text / OCR) ----------
-export async function summarize(text: string, kind: "transcript" | "notes" | "ocr" = "transcript"): Promise<string> {
+export async function summarize(text: string, kind: "transcript" | "notes" | "ocr" = "transcript", language: "en" | "te" | "mixed" = "en"): Promise<string> {
   const sys: ChatMessage = {
     role: "system",
     content: "You summarize Christian teaching material into warm, sermon-ready notes with: title, theme, key scriptures, 3 main takeaways, one illustration, one application."
@@ -251,11 +358,11 @@ export async function summarize(text: string, kind: "transcript" | "notes" | "oc
     role: "user",
     content: `Summarize the following ${kind} into sermon-ready notes. Keep it under 400 words.\n\n${text.slice(0, 6000)}`
   };
-  return chat({ messages: [sys, user], maxTokens: 700 });
+  return chat({ messages: [sys, user], maxTokens: 700, language });
 }
 
 // ---------- Convert freeform text into structured sermon-note JSON ----------
-export async function structureSermonNotes(raw: string): Promise<{
+export async function structureSermonNotes(raw: string, language: "en" | "te" | "mixed" = "en"): Promise<{
   title: string; scripture?: string; intro?: string;
   points: string[]; illustrations: string[]; application?: string; closing?: string
 }> {
@@ -267,7 +374,7 @@ export async function structureSermonNotes(raw: string): Promise<{
     role: "user",
     content: `Convert these raw notes into JSON with fields: title, scripture, intro, points (array of strings), illustrations (array of strings), application, closing. Keep points/illustrations to short phrases. Notes:\n\n${raw.slice(0, 6000)}`
   };
-  const out = await chat({ messages: [sys, user], temperature: 0.3, maxTokens: 900 });
+  const out = await chat({ messages: [sys, user], temperature: 0.3, maxTokens: 900, language });
   try {
     return JSON.parse(out);
   } catch {
