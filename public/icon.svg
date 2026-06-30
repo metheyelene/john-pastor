@@ -1,15 +1,48 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#dc2626"/>
-      <stop offset="0.5" stop-color="#ef4444"/>
-      <stop offset="1" stop-color="#f87171"/>
-    </linearGradient>
-    <radialGradient id="bg" cx="0.3" cy="0.3" r="1">
-      <stop offset="0" stop-color="#1a0000"/>
+    <radialGradient id="bg" cx="0.35" cy="0.35" r="1">
+      <stop offset="0" stop-color="#1a0202"/>
+      <stop offset="0.7" stop-color="#0a0000"/>
       <stop offset="1" stop-color="#000000"/>
     </radialGradient>
+    <linearGradient id="text" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fda4af"/>
+    </linearGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dc2626"/>
+      <stop offset="0.5" stop-color="#ef4444"/>
+      <stop offset="1" stop-color="#7f1d1d"/>
+    </linearGradient>
+    <!-- Neon red glow filter -->
+    <filter id="neonRed" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.1" result="blur1"/>
+      <feFlood flood-color="#ef4444" flood-opacity="0.9"/>
+      <feComposite in2="blur1" operator="in" result="glow1"/>
+      <feMerge>
+        <feMergeNode in="glow1"/>
+        <feMergeNode in="glow1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
+
+  <!-- Black accent background -->
   <rect width="64" height="64" rx="14" fill="url(#bg)"/>
-  <text x="32" y="44" font-family="Georgia,serif" font-size="38" font-weight="700" text-anchor="middle" fill="url(#g)">J</text>
+
+  <!-- Subtle red border accent -->
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" fill="none" stroke="url(#stroke)" stroke-width="1" opacity="0.85"/>
+
+  <!-- Neon-red glow halo behind the text -->
+  <ellipse cx="32" cy="36" rx="24" ry="7" fill="#dc2626" opacity="0.22"/>
+  <ellipse cx="32" cy="36" rx="18" ry="5" fill="#ef4444" opacity="0.30"/>
+
+  <!-- JOHN text with neon red glow -->
+  <text x="32" y="41"
+    font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+    font-size="18" font-weight="800"
+    text-anchor="middle"
+    letter-spacing="-0.4"
+    fill="url(#text)"
+    filter="url(#neonRed)">JOHN</text>
 </svg>
